@@ -49,3 +49,10 @@ mention image recognition competition and how GPUs played a role here
 === multi-GPU training
 
 == Summary
+
+== Where No Hardware can go
+
+[NOTE.speaker]
+--
+mention hardware versus algorithms
+--
