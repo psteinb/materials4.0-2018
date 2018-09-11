@@ -1,0 +1,343 @@
+---
+title: "Deep Learning Benchmarking on HPC clusters and clouds"
+output:    
+    html_document:
+        toc: true
+        toc_float: true
+        theme: cosmo
+        highlight: tango
+---
+
+# hardware description
+
+## taurus
+
+The default GPU nodes we use for these benchmarks have:
+
+- 2x Intel(R) Xeon(R) CPU E5-E5-2680 v3 (12 cores) @ 2.50GHz, MultiThreading Disabled, 
+- 64 GB RAM 
+- 128 GB SSD local disk
+- 4x NVIDIA Tesla K80 (12 GB GDDR RAM) GPUs
+
+The available native software is:
+
+- tensorflow/1.3.0-Python-3.5.2
+- singularity/2.4.2 for using docker containers in an HPC environment
+
+## gce 
+
+- single preemptive GCE instance, 6 GB of RAM, 1 vCPU, 1 K80, 10 GB of SSD
+
+# full training
+
+## comparing bare metal versus container based runs
+
+For this run, a full training of resnet30 was performed using the cifar10 dataset. For this, tensorflow at version 1.3.0 was used. 
+
+```{r load_data, echo=FALSE, fig.width = 10}
+library(dplyr, warn.conflicts=FALSE)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+
+options(readr.num_columns = 0)
+
+ffiles = Sys.glob(file.path("taurus/full/", "full*.tsv"))#list.files(path="./taurus/", pattern="full*.tsv",full.names=T)
+
+fulldf = lapply(ffiles, read_tsv) %>% bind_rows()
+fulldf$mode = as.factor(ifelse(grepl("singularity",fulldf$comment),"singularity","bare-metal"))
+fulldf = fulldf %>% filter(grepl("k80",comment))
+
+#with tribute to https://github.com/holgerbrandl
+fulldf = fulldf %>% mutate(pairs = str_split(opts, ",")) %>%
+    unnest(pairs) %>%
+    separate(pairs, c("key", "value"), sep = "=") %>%
+    spread(key, value)
+
+
+#legend_ord <- levels(with(df, reorder(Labels, Percent)))
+fulldf$batch_size <- as.integer(fulldf$batch_size)
+## cat(levels(fulldf$batch_size))
+## cat(sort(as.numeric(fulldf$batch_size)))
+
+## cat(levels(as.factor(sort(as.numeric(fulldf$batch_size)))))
+
+epoch_time = ggplot(fulldf,aes(epoch,epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_time = epoch_time + geom_line() + facet_grid( ~ mode + model, scales = 'free_x')
+epoch_time = epoch_time + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s")))
+epoch_time = epoch_time + scale_color_discrete(name="Batch Size")
+epoch_time
+
+epoch_time_single = ggplot(fulldf %>% filter(model=="resnet32v1", mode=="bare-metal"),aes(epoch,epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_time_single = epoch_time_single + geom_line() 
+epoch_time_single = epoch_time_single + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s")))
+epoch_time_single = epoch_time_single + scale_color_discrete(name="Batch Size")
+epoch_time_single
+
+ggsave("../images/deeprace-full-single.png",epoch_time_single)
+
+epoch_time_vs_singularity = ggplot(fulldf %>% filter(model=="resnet32v1"),aes(epoch,epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_time_vs_singularity = epoch_time_vs_singularity + geom_line() + facet_grid( ~ mode , scales = 'free_x')
+epoch_time_vs_singularity = epoch_time_vs_singularity + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s")))
+epoch_time_vs_singularity = epoch_time_vs_singularity + scale_color_discrete(name="Batch Size")
+epoch_time_vs_singularity
+
+ggsave("../images/deeprace-full-vs-singularity.png",epoch_time_vs_singularity)
+
+```
+
+It's interesting to see, that the time per epoch varies considerably. Both training sessions had checkpointing disabled.
+
+```{r show_options, fig.width = 10}
+
+unique(fulldf$checkpoint_epochs)
+
+glimpse(fulldf)
+
+```
+
+One source for this fluctuation that comes to mind is the boosting of the GPU which was enable during these runs.
+
+```{r hist_epoch_durations, echo=FALSE, fig.width = 10}
+## + geom_histogram( aes(x = x, y = ..density..), binwidth = diff(range(df$x))/30, fill="blue") +
+##   geom_histogram( aes(x = x2, y = -..density..), binwidth = diff(range(df$x))/30, fill= "green")
+sing = fulldf %>% filter(model=="resnet32v1",epoch_dur_sec<100,mode=="singularity")
+bare = fulldf %>% filter(model=="resnet32v1",epoch_dur_sec<100,mode!="singularity")
+
+unique(sing$batch_size)
+
+epoch_hist = ggplot() + my_theme
+     
+epoch_hist = epoch_hist + geom_histogram(data=bare,aes(x=epoch_dur_sec, fill="bare metal", y= ..density.. ),binwidth = 0.25) 
+epoch_hist = epoch_hist + geom_histogram(data=sing,aes(x=epoch_dur_sec, fill="singularity", y= -..density..),binwidth = 0.25) 
+epoch_hist = epoch_hist + labs(x=expression(paste(t[epoch])),y=expression(paste(count," / [ 0.25 s ]")))
+epoch_hist = epoch_hist + scale_fill_hue(name="Environment")
+epoch_hist = epoch_hist + coord_flip()
+
+epoch_hist
+
+ggsave("../images/deeprace-full-vs-singularity-back2back.png",epoch_hist)
+
+```
+
+It is interesting to note that the distance for the two modes differs by the same amount, namely 3 seconds. Further study on this is required.
+
+As a last cross check, here is the comparison of training loss on bare metal versus singularity.
+
+```{r val_loss_etc, echo=FALSE, fig.width = 10}
+val_loss = ggplot(fulldf,aes(epoch,val_loss,color=as.factor(batch_size))) + my_theme
+val_loss = val_loss + geom_line()+ facet_grid( ~ mode, scales = 'free_x')
+val_loss = val_loss + labs(x=expression(N[epoch]),y=expression(paste("validation loss / a.u.")))
+val_loss
+
+
+val_acc = ggplot(fulldf,aes(epoch,val_acc,color=as.factor(batch_size))) + my_theme
+val_acc = val_acc + geom_line()+ facet_grid( ~ mode, scales = 'free_x')
+val_acc = val_acc + labs(x=expression(N[epoch]),y=expression(paste("validation accuracy / a.u.")))
+val_acc
+
+
+top5_acc = ggplot(fulldf,aes(epoch,val_top_k_catacc,color=as.factor(batch_size))) + my_theme
+top5_acc = top5_acc + geom_line()+ facet_grid( ~ mode + model, scales = 'free_x')
+top5_acc = top5_acc + labs(x=expression(N[epoch]),y=expression(paste("top5 validation accuracy / a.u.")))
+top5_acc
+
+```
+
+It's intersting to see how the batch size of 32 exceeds the other configurations for resnet30. Above 125 epochs, no real change happens:
+
+```{r val_loss_hist, echo=FALSE, fig.width = 10}
+fulldf100 = fulldf %>% filter(epoch>125,dataset=="cifar10")
+
+
+hval_loss = ggplot(fulldf100,aes(val_loss,fill=as.factor(batch_size))) + my_theme
+hval_loss = hval_loss + geom_histogram(binwidth = 0.01)+ facet_grid( ~ mode, scales = 'free_x')
+hval_loss = hval_loss + labs(x=expression(paste("validation loss at epoch > 125")),y=expression(paste("N / 0.01 ")))
+hval_loss
+
+
+hval_acc = ggplot(fulldf100,aes(val_acc,fill=as.factor(batch_size))) + my_theme
+hval_acc = hval_acc + geom_histogram(binwidth = 0.001)+ facet_grid( ~ mode, scales = 'free_x')
+hval_acc = hval_acc + labs(x=expression(paste("validation accuracy at epoch > 125")),y=expression(paste("N / 0.001 ")))
+hval_acc
+
+```
+
+# short runs
+
+To make benchmarking more manageable, the number of epochs was limited to the first 10-15 depending on availability of resources. In this way, the timing fluctuations are expected to be studied.
+
+```{r load_shorts, echo=FALSE, fig.width = 10}
+
+cfiles = Sys.glob(file.path("taurus/short/", "*condensed.tsv"))#list.files(path="./taurus/", pattern="short*condensed.tsv",full.names=T)
+
+condenseddf = lapply(cfiles, read_tsv) %>% bind_rows()
+condenseddf$mode = as.factor(ifelse(grepl("singularity",condenseddf$comment),"singularity","bare-metal"))
+condenseddf = condenseddf %>% filter(grepl("k80",comment))
+
+#with tribute to https://github.com/holgerbrandl
+condenseddf = condenseddf %>% mutate(pairs = str_split(opts, ",")) %>%
+  unnest(pairs) %>%
+  separate(pairs, c("key", "value"), sep = "=") %>%
+  spread(key, value)
+
+condenseddf$batch_size <- as.integer(condenseddf$batch_size)
+
+short_rtimes = ggplot(condenseddf,aes(epoch_dur_sec,fill=as.factor(batch_size), alpha=mode)) + my_theme
+short_rtimes = short_rtimes + geom_histogram(binwidth = 2) + facet_grid( ~ model, scales = 'free_x')
+short_rtimes = short_rtimes + labs(x=expression(paste(t[epoch])),y=expression(paste(count," / [ 2 s ]")))
+short_rtimes
+
+```
+
+## `batch_size = 32`
+
+
+```{r short32, echo=FALSE, fig.width = 10}
+
+condenseddf32 = condenseddf %>% filter(batch_size==32,dataset=="cifar10")
+
+#
+epoch_time_32 = ggplot(condenseddf32,aes(as.factor(batch_size),epoch_dur_sec,color=model)) + my_theme
+#epoch_time_32 = epoch_time_32 + geom_point()
+epoch_time_32 = epoch_time_32 + geom_boxplot()
+epoch_time_32 = epoch_time_32 + facet_grid( ~ mode  , scales = 'free_x')
+epoch_time_32 = epoch_time_32 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+epoch_time_32 = epoch_time_32 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+epoch_time_32 = epoch_time_32 + ylim(0,250)
+# epoch_time_32 = epoch_time_32 + scale_color_manual(name="Model")
+
+epoch_time_32
+
+#epoch_summ = ggplot(epoch_summ,aes(as.factor(batch_size),median,color=model)) + my_theme
+
+
+```
+
+Also in this scenario, the runtime per epoch exhibits two modes. The runs with singularity can be reproduced to being quicker on the percent level. As the operating system used inside the container is Ubuntu 16.04 and the operating system used runs on RHEL 6.9, we can observe that the used glibc versions are quite different. This can be another source of variance for the runtime per epoch.
+
+## `batch_size = 128`
+
+```{r short128, echo=FALSE, fig.width = 10}
+
+condenseddf128 = condenseddf %>% filter(batch_size==128,dataset=="cifar10")
+
+epoch_time_128 = ggplot(condenseddf128,aes(epoch,epoch_dur_sec,color=model)) + my_theme
+epoch_time_128 = epoch_time_128 + geom_point() + facet_grid( ~ mode, scales = 'free_x')
+epoch_time_128 = epoch_time_128 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+epoch_time_128 = epoch_time_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+epoch_time_128
+
+```
+
+The situation with a larger batch size is much more homogenous. My guess is that due to less up/down transfers from/to the GPU (it's more data to process per batch) and more steady load on the GPU (the GPU device is much more busy), the software influences that can cause more variations equal out. As the K80 has 12 GB of memory, the batch size could be increased ( 256 , 512 ). 
+
+Facebook studied the influence of larger batch sizes with torch [here](https://research.fb.com/wp-content/uploads/2017/06/imagenet1kin1h5.pdf), which would require an adaptation of the learning rate though.
+
+## GCE runs
+
+```{r gce, echo=FALSE, fig.width = 10}
+
+cfiles = Sys.glob(file.path("gce/", "*condensed.tsv"))
+
+gcedf = lapply(cfiles, read_tsv) %>% bind_rows()
+gcedf$mode = as.factor("cloud")
+
+#with tribute to https://github.com/holgerbrandl
+gcedf = gcedf %>% mutate(pairs = str_split(opts, ",")) %>%
+  unnest(pairs) %>%
+  separate(pairs, c("key", "value"), sep = "=") %>%
+  spread(key, value)
+
+gcedf$batch_size <- as.integer(gcedf$batch_size)
+gcedf$batch_size <- ifelse(gcedf$batch_size == 265,256,gcedf$batch_size)
+
+
+gce_epoch_summ = gcedf %>% group_by(model,mode,batch_size,epoch)
+
+gce_single_summ = gce_epoch_summ %>% group_by(model,mode,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+gce_nowarmup_summ = gce_epoch_summ %>% filter(epoch>2) %>% group_by(model,mode,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+
+epoch_acc_time = ggplot(gce_single_summ,aes(as.factor(batch_size),median,color=mode)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_acc_time
+
+```
+
+```{r gce_variance, echo=FALSE, fig.width = 10}
+
+epoch_var_time = ggplot(gce_single_summ,aes(x=as.factor(batch_size),y=median/median,color=mode)) + my_theme
+## epoch_var_time = epoch_var_time + geom_point(position=position_dodge(width=0.5))
+epoch_var_time = epoch_var_time + geom_errorbar(aes(ymin=(p25)/median,ymax=(p75)/median),position=position_dodge(width=0.5))
+epoch_var_time = epoch_var_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_var_time = epoch_var_time + labs(x="batch size",y=expression(paste("25-75 quantile range(",t[epoch],") / median(",t[epoch],")")))
+epoch_var_time
+
+
+```
+
+# Summary 
+
+
+```{r short_in_one, echo=FALSE, fig.width = 10}
+# %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+#single_summ = condenseddf %>% group_by(model,mode,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75)) %>% bind_rows(gce_single_summ)
+epoch_summ = condenseddf %>% group_by(model,mode,batch_size,epoch)
+
+single_summ = epoch_summ %>% group_by(model,mode,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+
+epoch_ntime = ggplot(single_summ,aes(as.factor(batch_size),median,color=mode)) + my_theme
+epoch_ntime = epoch_ntime + geom_point(position=position_dodge(width=0.5))
+epoch_ntime = epoch_ntime + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_ntime = epoch_ntime + facet_grid( ~ model  , scales = 'free_x')
+epoch_ntime = epoch_ntime + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+
+epoch_ntime
+
+ggsave("../images/deeprace-short-runtimes.png",epoch_ntime)
+
+
+single_summ = single_summ %>% bind_rows(gce_single_summ)
+
+nowarmup_summ = epoch_summ %>% filter(epoch>2) %>% group_by(model,mode,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75)) %>% bind_rows(gce_nowarmup_summ)
+
+epoch_ntime = ggplot(single_summ,aes(as.factor(batch_size),median,color=mode)) + my_theme
+#epoch_ntime = epoch_ntime + geom_point()
+epoch_ntime = epoch_ntime + geom_point(position=position_dodge(width=0.5))
+epoch_ntime = epoch_ntime + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+#epoch_ntime = epoch_ntime + geom_jitter()
+epoch_ntime = epoch_ntime + facet_grid( ~ model  , scales = 'free_x')
+epoch_ntime = epoch_ntime + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+#epoch_ntime = epoch_ntime + ylim(0,250)
+# epoch_ntime = epoch_ntime + scale_color_manual(name="Model")
+
+epoch_ntime
+
+ggsave("../images/deeprace-short-runtimes-vs-cloud.png",epoch_ntime)
+
+```
+
+```{r short_in_one_variance, echo=FALSE, fig.width = 10}
+
+epoch_var_time = ggplot(nowarmup_summ,aes(x=as.factor(batch_size),y=median/median,color=mode)) + my_theme
+## epoch_var_time = epoch_var_time + geom_point(position=position_dodge(width=0.5))
+epoch_var_time = epoch_var_time + geom_errorbar(aes(ymin=(p25)/median,ymax=(p75)/median),position=position_dodge(width=0.5))
+epoch_var_time = epoch_var_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_var_time = epoch_var_time + labs(x="batch size",y=expression(paste("25-75 quantile range(",t[epoch],") / median(",t[epoch],")")))
+epoch_var_time
+
+```
+
+

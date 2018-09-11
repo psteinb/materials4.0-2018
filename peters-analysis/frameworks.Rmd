@@ -1,0 +1,151 @@
+---
+title: "Deep Learning Benchmarking on different hardware"
+output:    
+    html_document:
+        toc: true
+        toc_float: true
+        theme: cosmo
+        highlight: tango
+---
+
+
+# framework comparison
+
+The following benchmarks were run on dedicated hardware available to me by chance. I'd like to thank the individuals for allowing me to run deeprace on them.
+
+```{r load_data, echo=FALSE, fig.width = 8}
+library(dplyr, warn.conflicts=FALSE)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+options(readr.num_columns = 0)
+
+loaddata = function(path, pattern){
+
+  c2files = Sys.glob(file.path(path, pattern))
+
+  value = lapply(c2files, read_tsv) %>% bind_rows()
+  value$mode = as.factor(ifelse(grepl("singularity",value$comment),"container","bare-metal"))
+
+  #with tribute to https://github.com/holgerbrandl
+  value = value %>% mutate(pairs = str_split(opts, ",")) %>%
+    unnest(pairs) %>%
+    separate(pairs, c("key", "value"), sep = "=") %>%
+    spread(key, value)
+
+  value$batch_size <- as.integer(value$batch_size)
+
+  return(value)
+}
+
+fwdf <- loaddata("talisker/keras-vs-tf.keras","*condensed.tsv")
+fwdf$gpu_type = "Titan Xp"
+
+```
+
+## with 1 GPU only
+
+
+```{r ngpu1, echo=FALSE, fig.width = 8}
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+#update_geom_defaults("line", list(shape = 12))
+
+tdf = fwdf %>% filter(n_gpus==1) %>% group_by(model,backend,batch_size,epoch)
+
+gce_single_summ = tdf %>% group_by(model,backend,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+gce_nowarmup_summ = tdf %>% filter(epoch>2) %>% group_by(model,backend,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+
+epoch_acc_time = ggplot(gce_single_summ,aes(as.factor(batch_size),median,color=backend)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + facet_wrap( ~ model  , scales = 'free')
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_acc_time = epoch_acc_time + expand_limits(x = 0, y = 0)
+epoch_acc_time
+
+ggsave("../images/deeprace-frameworks.png",epoch_acc_time)
+ggsave("../images/deeprace-frameworks.svg",epoch_acc_time)
+
+```
+
+
+## with 2 GPUs
+
+```{r ngpu2, echo=FALSE, fig.width = 8}
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+#update_geom_defaults("line", list(shape = 12))
+
+tdf = fwdf %>% filter(n_gpus==2) %>% group_by(model,backend,batch_size,epoch)
+
+gce_single_summ = tdf %>% group_by(model,backend,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+gce_nowarmup_summ = tdf %>% filter(epoch>2) %>% group_by(model,backend,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+
+epoch_acc_time = ggplot(gce_single_summ,aes(as.factor(batch_size),median,color=backend)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + facet_wrap( ~ model  , scales = 'free')
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_acc_time = epoch_acc_time + expand_limits(x = 0, y = 0)
+epoch_acc_time
+
+```
+
+## per model
+
+
+```{r per_model, echo=FALSE, fig.width = 8}
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+#update_geom_defaults("line", list(shape = 12))
+
+tdf = fwdf  %>% group_by(model,backend,n_gpus,batch_size,epoch)
+
+single_summ = tdf %>% group_by(model,backend,n_gpus,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+nowarmup_summ = tdf %>% filter(epoch>2) %>% group_by(model,backend,n_gpus,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+```
+
+### Resnet
+
+``` {r resnet, echo=FALSE, fig.width = 8}
+
+epoch_acc_time = ggplot(single_summ %>% filter(grepl("resnet",model)),aes(as.factor(batch_size),median,color=backend)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + facet_wrap( ~  n_gpus)
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_acc_time = epoch_acc_time + expand_limits(x = 0, y = 0)
+epoch_acc_time
+
+```
+
+### Care2D
+
+``` {r care2d, echo=FALSE, fig.width = 8}
+
+epoch_acc_time = ggplot(single_summ %>% filter(grepl("care",model)),aes(as.factor(batch_size),median,color=backend)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_acc_time = epoch_acc_time + facet_wrap( ~  n_gpus)
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_acc_time = epoch_acc_time + expand_limits(x = 0, y = 0)
+epoch_acc_time
+
+```

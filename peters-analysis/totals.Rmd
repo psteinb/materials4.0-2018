@@ -1,0 +1,99 @@
+---
+title: "Deep Learning Benchmarking on different hardware - total runtime analysis"
+output:    
+    html_document:
+        toc: true
+        toc_float: true
+        theme: cosmo
+        highlight: tango
+---
+
+
+```{r load_data, echo=FALSE, fig.width = 10}
+library(dplyr, warn.conflicts=FALSE)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+options(readr.num_columns = 0)
+
+loaddata = function(path, pattern){
+
+  c2files = Sys.glob(file.path(path, pattern))
+
+  value = lapply(c2files, read_tsv) %>% bind_rows()
+  value$mode = as.factor(ifelse(grepl("docker",value$comment),"container","bare-metal"))
+
+  value$train_duration = as.numeric(difftime(strptime(paste(value$train_end),"%Y%m%d:%H%M%S"),#%Y%m%d:%H%M%S
+                                  strptime(paste(value$train_start),"%Y%m%d:%H%M%S"), units="secs"))
+
+  #with tribute to https://github.com/holgerbrandl
+  value = value %>% mutate(pairs = str_split(opts, ",")) %>%
+    unnest(pairs) %>%
+    separate(pairs, c("key", "value"), sep = "=") %>%
+    spread(key, value)
+
+  value$batch_size <- as.integer(value$batch_size)
+
+  return(value)
+}
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+
+```
+
+# total time analysis from the short runs
+
+## keras weak scaling
+
+``` {r load_keras_rest, echo=FALSE, fig.width = 10}
+keras_1gpu <- loaddata("taurus/short","*128*condensed.tsv")
+keras_2gpu <- loaddata("taurus/short2","*256*condensed.tsv")
+keras_4gpu <- loaddata("taurus/short4","*512*condensed.tsv")
+keras_1gpu$n_gpus= as.integer(1)
+keras_2gpu$n_gpus= as.integer(keras_2gpu$n_gpus)
+keras_4gpu$n_gpus= as.integer(keras_4gpu$n_gpus)
+
+keras_ngpu = keras_1gpu %>% bind_rows(keras_2gpu) %>% bind_rows(keras_4gpu) %>% group_by(model,mode,batch_size,n_gpus)
+
+keras_summ = keras_ngpu %>% summarize(mean = mean(train_duration), median= median(train_duration), std = sd(train_duration), p25=quantile(train_duration,.25), p75=quantile(train_duration,.75))
+
+
+epoch_total_time = ggplot(keras_summ,aes(as.factor(batch_size),median,color=as.factor(n_gpus))) + my_theme
+
+epoch_total_time = epoch_total_time + geom_point(position=position_dodge(width=.5))
+epoch_total_time = epoch_total_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=.5))
+epoch_total_time = epoch_total_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_total_time = epoch_total_time + labs(x="batch size",y=expression(paste("median(",t[train],") / s")))
+epoch_total_time
+
+```
+
+## keras strong scaling
+
+``` {r load_keras_strong, echo=FALSE, fig.width = 10}
+keras_1gpu <- loaddata("taurus/short","*512*condensed.tsv")
+keras_2gpu <- loaddata("taurus/short2","*512*condensed.tsv")
+keras_4gpu <- loaddata("taurus/short4","*512*condensed.tsv")
+keras_1gpu$n_gpus= as.integer(1)
+keras_2gpu$n_gpus= as.integer(keras_2gpu$n_gpus)
+keras_4gpu$n_gpus= as.integer(keras_4gpu$n_gpus)
+
+keras_ngpu = keras_1gpu %>% bind_rows(keras_2gpu) %>% bind_rows(keras_4gpu) %>% group_by(model,mode,batch_size,n_gpus)
+
+keras_summ = keras_ngpu %>% summarize(mean = mean(train_duration), median= median(train_duration), std = sd(train_duration), p25=quantile(train_duration,.25), p75=quantile(train_duration,.75))
+
+
+epoch_total_time = ggplot(keras_summ,aes(as.factor(n_gpus),median,color=mode)) + my_theme
+
+epoch_total_time = epoch_total_time + geom_point(position=position_dodge(width=.5))
+epoch_total_time = epoch_total_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=.5))
+epoch_total_time = epoch_total_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_total_time = epoch_total_time + labs(x="batch size",y=expression(paste("median(",t[train],") / s")))
+epoch_total_time
+
+```

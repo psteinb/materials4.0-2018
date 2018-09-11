@@ -1,0 +1,273 @@
+---
+title: "Deep Learning Benchmarking on HPC clusters and multi-gpu models"
+output:    
+    html_document:
+        toc: true
+        toc_float: true
+        theme: cosmo
+        highlight: tango
+---
+
+# Multi-GPU runs
+
+Multi-gpu runs were not supported with tf 1.3 and hence I had to upgrade to 1.5. I assume that singularity is equally performant for 1.5 than for 1.3, I rely on this assumption throughout the course of the following data.
+
+The implementation of multi-GPU support is based on data parallelism for an individual batch.
+
+# Weak scaling
+
+As I scale up the GPUs, I also scale the batch size.
+
+## 2 GPUs
+
+### Keras
+
+```{r load_data, echo=FALSE, fig.width = 10}
+library(dplyr, warn.conflicts=FALSE)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+options(readr.num_columns = 0)
+
+loaddata = function(path, pattern){
+
+  c2files = Sys.glob(file.path(path, pattern))
+
+  value = lapply(c2files, read_tsv) %>% bind_rows()
+  value$mode = as.factor(ifelse(grepl("singularity",value$comment),"singularity","bare-metal"))
+
+  #with tribute to https://github.com/holgerbrandl
+  value = value %>% mutate(pairs = str_split(opts, ",")) %>%
+    unnest(pairs) %>%
+    separate(pairs, c("key", "value"), sep = "=") %>%
+    spread(key, value)
+
+  value$batch_size <- as.integer(value$batch_size)
+
+  return(value)
+}
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+
+```
+
+``` {r load_keras_rest, echo=FALSE, fig.width = 10}
+keras_1gpu <- loaddata("taurus/short","*128*condensed.tsv")
+keras_2gpu <- loaddata("taurus/short2","*256*condensed.tsv")
+keras_4gpu <- loaddata("taurus/short4","*512*condensed.tsv")
+keras_1gpu$n_gpus= as.integer(1)
+keras_2gpu$n_gpus= as.integer(keras_2gpu$n_gpus)
+keras_4gpu$n_gpus= as.integer(keras_4gpu$n_gpus)
+
+keras_ngpu <- keras_1gpu %>% bind_rows(keras_2gpu) %>% bind_rows(keras_4gpu)
+
+```
+
+```{r keras_2gpus, echo=FALSE, fig.width = 10}
+
+keras_bs128_56v1 = keras_1gpu %>% filter(batch_size ==128,model=="resnet56v1", mode == "singularity") %>% bind_rows(keras_2gpu %>% filter(batch_size ==256,model=="resnet56v1", mode == "singularity")) # %>% bind_rows(keras_4gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity"))
+keras_bs128_32v1 = keras_1gpu %>% filter(batch_size ==128,model=="resnet32v1", mode == "singularity") %>% bind_rows(keras_2gpu %>% filter(batch_size ==256,model=="resnet32v1", mode == "singularity")) # %>% bind_rows(keras_4gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity"))
+
+tdf = keras_bs128_56v1 %>% bind_rows(keras_bs128_32v1)
+eptime_ngpu2_128 = ggplot(tdf,aes(epoch,epoch_dur_sec,color=as.factor(n_gpus))) + my_theme
+eptime_ngpu2_128 = eptime_ngpu2_128 + geom_point() + facet_grid( ~ model, scales = 'free_x')
+eptime_ngpu2_128 = eptime_ngpu2_128 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+#eptime_ngpu2_128 = eptime_ngpu2_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_ngpu2_128
+
+```
+
+The resnet50 results show that there are some outliers. I am guessing due to GPU boost issues or overheating of the devices
+
+```{r keras_2gpus_hists, echo=FALSE, fig.width = 10}
+
+eptime_hist_128 = ggplot( tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ model, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+eptime_hist_128 = eptime_hist_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_hist_128
+
+```
+
+### tensorflow
+
+``` {r load_tf_rest, echo=FALSE, fig.width = 10}
+
+tf_1gpu <- loaddata("taurus/tf-short","*128*condensed.tsv")
+tf_2gpu <- loaddata("taurus/tf-short2","*256*condensed.tsv")
+tf_4gpu <- loaddata("taurus/tf-short4","*512*condensed.tsv")
+tf_1gpu$n_gpus= as.integer(1)
+tf_2gpu$n_gpus= as.integer(tf_2gpu$n_gpus)
+tf_4gpu$n_gpus= as.integer(tf_4gpu$n_gpus)
+
+tf_ngpu <- tf_1gpu %>% bind_rows(tf_2gpu) %>% bind_rows(tf_4gpu)
+```
+
+
+```{r tf_2gpus, echo=FALSE, fig.width = 10}
+
+tf_bs128_56v1 = tf_1gpu %>% filter(batch_size ==128,model=="resnet56v1", mode == "singularity") %>% bind_rows(tf_2gpu %>% filter(batch_size ==256,model=="resnet56v1", mode == "singularity")) #%>% bind_rows(tf_4gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity"))
+tf_bs128_32v1 = tf_1gpu %>% filter(batch_size ==128,model=="resnet32v1", mode == "singularity") %>% bind_rows(tf_2gpu %>% filter(batch_size ==256,model=="resnet32v1", mode == "singularity")) #%>% bind_rows(tf_4gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity"))
+
+tdf = tf_bs128_56v1 %>% bind_rows(tf_bs128_32v1)
+
+eptime_ngpu2_128 = ggplot(tdf,aes(epoch,epoch_dur_sec,color=as.factor(n_gpus))) + my_theme
+eptime_ngpu2_128 = eptime_ngpu2_128 + geom_point() + facet_grid( ~ model, scales = 'free_x')
+eptime_ngpu2_128 = eptime_ngpu2_128 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+#eptime_ngpu2_128 = eptime_ngpu2_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_ngpu2_128
+
+```
+
+It appears that for tf n_gpus=2, the resnet32v1 runs are missing.
+
+```{r tf_2gpus_hists, echo=FALSE, fig.width = 10}
+
+eptime_hist_128 = ggplot(tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ model, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+eptime_hist_128 = eptime_hist_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_hist_128
+
+```
+
+
+## 4 GPUs
+
+### Keras
+
+```{r keras_4gpus, echo=FALSE, fig.width = 10}
+
+
+keras_bs128_56v1 = keras_bs128_56v1 %>% bind_rows(keras_4gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity"))
+keras_bs128_32v1 = keras_bs128_32v1 %>% bind_rows(keras_4gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity"))
+
+tdf = keras_bs128_56v1 %>% bind_rows(keras_bs128_32v1)
+
+eptime_ngpu2_128 = ggplot(tdf,aes(epoch,epoch_dur_sec,color=as.factor(n_gpus))) + my_theme
+eptime_ngpu2_128 = eptime_ngpu2_128 + geom_point() + facet_grid( ~ model, scales = 'free_x')
+eptime_ngpu2_128 = eptime_ngpu2_128 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+#eptime_ngpu2_128 = eptime_ngpu2_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_ngpu2_128
+
+```
+
+
+The resnet50 results show that there are some outliers. I am guessing due to GPU boost issues or overheating of the devices
+
+```{r keras_4gpus_hists, echo=FALSE, fig.width = 10}
+
+eptime_hist_128 = ggplot(tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ model, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+eptime_hist_128 = eptime_hist_128 + scale_fill_hue(name="N(GPUs)")
+
+#eptime_hist_128 = eptime_hist_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_hist_128
+
+ggsave("../images/deeprace-short-multi-gpu-keras.png", eptime_hist_128)
+```
+
+### Tensorflow
+
+```{r tf_4gpus, echo=FALSE, fig.width = 10}
+
+tf_bs128_56v1 = tf_bs128_56v1 %>% bind_rows(tf_4gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity"))
+tf_bs128_32v1 = tf_bs128_32v1 %>% bind_rows(tf_4gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity"))
+
+tdf = tf_bs128_56v1 %>% bind_rows(tf_bs128_32v1)
+
+eptime_ngpu2_128 = ggplot(tdf,aes(epoch,epoch_dur_sec,color=as.factor(n_gpus))) + my_theme
+eptime_ngpu2_128 = eptime_ngpu2_128 + geom_point() + facet_grid( ~ model, scales = 'free_x')
+eptime_ngpu2_128 = eptime_ngpu2_128 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+#eptime_ngpu2_128 = eptime_ngpu2_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_ngpu2_128
+
+eptime_hist_128 = ggplot(tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ model, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+eptime_hist_128 = eptime_hist_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_hist_128
+
+ggsave("../images/deeprace-short-multi-gpu-tf.png", eptime_hist_128)
+
+tdf = tf_bs128_56v1 %>% bind_rows(keras_bs128_56v1 %>% select(-n_model_params))
+tdf$implementation = ifelse(grepl("keras",tdf$versions),"keras+tf","tensorflow")
+eptime_hist_128 = ggplot(tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ implementation, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) 
+eptime_hist_128 = eptime_hist_128 + scale_fill_hue(name="N(GPU) Resnet56v1~", labels=c("1 bs=128","2 bs=256","4 bs=512"))
+
+
+eptime_hist_128
+ggsave("../images/deeprace-short-multi-gpu-compared.png", eptime_hist_128)
+
+```
+
+# Strong Scaling
+
+I keep the `batch_size` constant and scale up the GPUs.
+
+## 4 GPUS
+
+### Keras
+
+
+``` {r strong_keras, echo=FALSE, fig.width = 10}
+keras_1gpu <- loaddata("taurus/short","*512*condensed.tsv")
+keras_2gpu <- loaddata("taurus/short2","*512*condensed.tsv")
+keras_4gpu <- loaddata("taurus/short4","*512*condensed.tsv")
+keras_1gpu$n_gpus= as.integer(1)
+keras_2gpu$n_gpus= as.integer(keras_2gpu$n_gpus)
+keras_4gpu$n_gpus= as.integer(keras_4gpu$n_gpus)
+
+keras_ngpu <- keras_1gpu %>% bind_rows(keras_2gpu) %>% bind_rows(keras_4gpu)
+
+keras_strong_bs512_56v1 = keras_1gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity") %>% bind_rows(keras_2gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity")) %>% bind_rows(keras_4gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity"))
+
+keras_strong_bs512_32v1 = keras_1gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity") %>% bind_rows(keras_2gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity")) %>% bind_rows(keras_4gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity"))
+
+tdf = keras_strong_bs512_32v1 %>% bind_rows(keras_strong_bs512_56v1)
+
+eptime_hist_128 = ggplot(tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ model, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+eptime_hist_128 = eptime_hist_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_hist_128
+
+```
+
+
+### Tensorflow
+
+``` {r strong_tf, echo=FALSE, fig.width = 10}
+tf_1gpu <- loaddata("taurus/tf-short","*512*condensed.tsv")
+tf_2gpu <- loaddata("taurus/tf-short2","*512*condensed.tsv")
+tf_4gpu <- loaddata("taurus/tf-short4","*512*condensed.tsv")
+
+tf_1gpu$n_gpus= as.integer(1)
+tf_2gpu$n_gpus= as.integer(tf_2gpu$n_gpus)
+tf_4gpu$n_gpus= as.integer(tf_4gpu$n_gpus)
+
+tf_ngpu <- tf_1gpu %>% bind_rows(tf_2gpu) %>% bind_rows(tf_4gpu)
+
+tf_strong_bs512_56v1 = tf_1gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity") %>% bind_rows(tf_2gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity")) %>% bind_rows(tf_4gpu %>% filter(batch_size ==512,model=="resnet56v1", mode == "singularity"))
+tf_strong_bs512_32v1 = tf_1gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity") %>% bind_rows(tf_2gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity")) %>% bind_rows(tf_4gpu %>% filter(batch_size ==512,model=="resnet32v1", mode == "singularity"))
+
+```
+
+``` {r strong_tf_hist, echo=FALSE, fig.width = 10}
+tdf = tf_strong_bs512_32v1 %>% bind_rows(tf_strong_bs512_56v1)
+
+eptime_hist_128 = ggplot(tdf,aes(epoch_dur_sec,fill=as.factor(n_gpus))) + my_theme
+eptime_hist_128 = eptime_hist_128 + geom_histogram() + facet_grid( ~ model, scales = 'free_x')
+eptime_hist_128 = eptime_hist_128 + labs(x=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+eptime_hist_128 = eptime_hist_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+eptime_hist_128
+
+```

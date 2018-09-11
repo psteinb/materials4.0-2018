@@ -1,0 +1,182 @@
+---
+title: "Deep Learning Benchmarking on HPC clusters and clouds using pure tf"
+output:    
+    html_document:
+        toc: true
+        toc_float: true
+        theme: cosmo
+        highlight: tango
+---
+
+# hardware description
+
+## taurus
+
+The default GPU nodes we use for these benchmarks have:
+
+- 2x Intel(R) Xeon(R) CPU E5-E5-2680 v3 (12 cores) @ 2.50GHz, MultiThreading Disabled, 
+- 64 GB RAM 
+- 128 GB SSD local disk
+- 4x NVIDIA Tesla K80 (12 GB GDDR RAM) GPUs
+
+The available native software is:
+
+- tensorflow/1.3.0-Python-3.5.2
+- singularity/2.4.2 for using docker containers in an HPC environment
+
+## gce 
+
+- single preemptive GCE instance, 6 GB of RAM, 1 vCPU, 1 K80, 10 GB of SSD
+
+# full training
+
+## comparing bare metal versus container based runs
+
+For this run, a full training of resnet30 was performed using the cifar10 dataset. For this, tensorflow at version 1.3.0 was used. 
+
+```{r load_data, echo=FALSE, fig.width = 10}
+library(dplyr, warn.conflicts=FALSE)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+
+options(readr.num_columns = 0)
+
+loaddata = function(path, pattern){
+
+  c2files = Sys.glob(file.path(path, pattern))
+
+  value = lapply(c2files, read_tsv) %>% bind_rows()
+  value$mode = as.factor(ifelse(grepl("singularity",value$comment),"singularity","bare-metal"))
+
+  #with tribute to https://github.com/holgerbrandl
+  value = value %>% mutate(pairs = str_split(opts, ",")) %>%
+    unnest(pairs) %>%
+    separate(pairs, c("key", "value"), sep = "=") %>%
+    spread(key, value)
+
+  value$batch_size <- as.integer(value$batch_size)
+
+  return(value)
+}
+
+fulldf <- loaddata("taurus/tf-full","*tsv")
+
+fulldf = fulldf %>% filter(grepl("k80",comment))
+
+#with tribute to https://github.com/holgerbrandl
+
+epoch_time = ggplot(fulldf,aes(epoch,epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_time = epoch_time + geom_line() + facet_grid( ~ mode + model, scales = 'free_x')
+epoch_time = epoch_time + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s")))
+epoch_time = epoch_time + scale_color_discrete(name="Batch Size")
+epoch_time
+
+
+epoch_time_vs_singularity = ggplot(fulldf %>% filter(model=="resnet32v1"),aes(epoch,epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_time_vs_singularity = epoch_time_vs_singularity + geom_line() + facet_grid( ~ mode , scales = 'free_x')
+epoch_time_vs_singularity = epoch_time_vs_singularity + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s")))
+epoch_time_vs_singularity = epoch_time_vs_singularity + scale_color_discrete(name="Batch Size")
+epoch_time_vs_singularity
+
+```
+
+It's interesting to see, that the time per epoch varies considerably. Both training sessions had checkpointing disabled.
+
+```{r show_options, fig.width = 10}
+
+unique(fulldf$checkpoint_epochs)
+
+glimpse(fulldf)
+
+```
+
+
+```{r val_loss_etc, echo=FALSE, fig.width = 10}
+val_loss = ggplot(fulldf,aes(epoch,val_loss,color=as.factor(batch_size))) + my_theme
+val_loss = val_loss + geom_line()+ facet_grid( ~ mode, scales = 'free_x')
+val_loss = val_loss + labs(x=expression(N[epoch]),y=expression(paste("validation loss / a.u.")))
+val_loss
+
+
+val_acc = ggplot(fulldf,aes(epoch,val_acc,color=as.factor(batch_size))) + my_theme
+val_acc = val_acc + geom_line()+ facet_grid( ~ mode, scales = 'free_x')
+val_acc = val_acc + labs(x=expression(N[epoch]),y=expression(paste("validation accuracy / a.u.")))
+val_acc
+
+
+## top5_acc = ggplot(fulldf,aes(epoch,val_top_k_catacc,color=as.factor(batch_size))) + my_theme
+## top5_acc = top5_acc + geom_line()+ facet_grid( ~ mode + model, scales = 'free_x')
+## top5_acc = top5_acc + labs(x=expression(N[epoch]),y=expression(paste("top5 validation accuracy / a.u.")))
+## top5_acc
+
+```
+
+It's intersting to see how the batch size of 32 exceeds the other configurations for resnet30. Above 125 epochs, no real change happens:
+
+```{r val_loss_hist, echo=FALSE, fig.width = 10}
+fulldf100 = fulldf %>% filter(epoch>125,dataset=="cifar10")
+
+
+hval_loss = ggplot(fulldf100,aes(val_loss,fill=as.factor(batch_size))) + my_theme
+hval_loss = hval_loss + geom_histogram(binwidth = 0.01)+ facet_grid( ~ mode, scales = 'free_x')
+hval_loss = hval_loss + labs(x=expression(paste("validation loss at epoch > 125")),y=expression(paste("N / 0.01 ")))
+hval_loss
+
+
+hval_acc = ggplot(fulldf100,aes(val_acc,fill=as.factor(batch_size))) + my_theme
+hval_acc = hval_acc + geom_histogram(binwidth = 0.001)+ facet_grid( ~ mode, scales = 'free_x')
+hval_acc = hval_acc + labs(x=expression(paste("validation accuracy at epoch > 125")),y=expression(paste("N / 0.001 ")))
+hval_acc
+
+```
+
+# short runs
+
+To make benchmarking more manageable, the number of epochs was limited to the first 10-15 depending on availability of resources. In this way, the timing fluctuations are expected to be studied.
+
+```{r load_shorts, echo=FALSE, fig.width = 10}
+
+#condenseddf32_32= loaddata("taurus/tf-short/", "resnet32v1-tf-short-singularity-*.tsv")
+condenseddf= loaddata("taurus/tf-short/", "*condensed*.tsv")
+
+short_rtimes = ggplot(condenseddf,aes(epoch_dur_sec,fill=as.factor(batch_size))) + my_theme
+short_rtimes = short_rtimes + geom_histogram(binwidth = 2) + facet_grid( ~ model, scales = 'free_x')
+short_rtimes = short_rtimes + labs(x=expression(paste(t[epoch])),y=expression(paste(count," / [ 2 s ]")))
+short_rtimes
+
+```
+
+## `batch_size = 128`
+
+```{r short128, echo=FALSE, fig.width = 10}
+
+condenseddf128 = condenseddf %>% filter(batch_size==128,dataset=="cifar10")
+
+epoch_time_128 = ggplot(condenseddf128,aes(epoch,epoch_dur_sec,color=model)) + my_theme
+epoch_time_128 = epoch_time_128 + geom_point() + facet_grid( ~ mode, scales = 'free_x')
+epoch_time_128 = epoch_time_128 + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+epoch_time_128 = epoch_time_128 + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+epoch_time_128
+
+epoch_summ = condenseddf %>% group_by(model,mode,batch_size,epoch)
+
+single_summ = epoch_summ %>% group_by(model,mode,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+
+epoch_ntime = ggplot(single_summ,aes(as.factor(batch_size),median,color=mode)) + my_theme
+epoch_ntime = epoch_ntime + geom_point(position=position_dodge(width=0.5))
+epoch_ntime = epoch_ntime + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=0.5))
+epoch_ntime = epoch_ntime + facet_grid( ~ model  , scales = 'free_x')
+epoch_ntime = epoch_ntime + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_ntime
+```
+
+I don't understand where this is coming from.

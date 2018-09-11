@@ -1,0 +1,134 @@
+---
+title: "Deep Learning Benchmarking on different hardware"
+output:    
+    html_document:
+        toc: true
+        toc_float: true
+        theme: cosmo
+        highlight: tango
+---
+
+
+# Special hardware
+
+The following benchmarks were run on dedicated hardware available to me by chance. I'd like to thank the individuals for allowing me to run deeprace on them.
+
+## AMD
+
+```{r load_data, echo=FALSE, fig.width = 8}
+library(dplyr, warn.conflicts=FALSE)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+
+options(readr.num_columns = 0)
+
+loaddata = function(path, pattern){
+
+  c2files = Sys.glob(file.path(path, pattern))
+
+  value = lapply(c2files, read_tsv) %>% bind_rows()
+  value$mode = as.factor(ifelse(grepl("docker",value$comment),"container","bare-metal"))
+
+  #with tribute to https://github.com/holgerbrandl
+  value = value %>% mutate(pairs = str_split(opts, ",")) %>%
+    unnest(pairs) %>%
+    separate(pairs, c("key", "value"), sep = "=") %>%
+    spread(key, value)
+
+  value$batch_size <- as.integer(value$batch_size)
+
+  return(value)
+}
+
+rocmdf <- loaddata("p47/short","*condensed.tsv")
+rocmdf$gpu_type = "mi25"
+k80df <- loaddata("taurus/short","*sing*condensed.tsv")
+k80df$gpu_type = "k80"
+k80df <- k80df %>% filter(batch_size <= 128)
+
+```
+
+Let's first look at the runtimes of MI25 cards from within a docker container.
+
+```{r short128, echo=FALSE, fig.width = 8}
+
+my_theme = theme_bw() + theme(axis.text=element_text(size=12),
+                              axis.title=element_text(size=16,face="bold"))
+my_theme = my_theme + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+my_theme = my_theme + theme(strip.text.x=element_text(size=14))
+update_geom_defaults("point", list(shape = 12))
+#update_geom_defaults("line", list(shape = 12))
+
+tdf = rocmdf %>% filter(batch_size<=128)
+
+epoch_time = ggplot(tdf,aes(epoch,epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_time = epoch_time + geom_point() + facet_grid( ~ model, scales = 'free_x')
+epoch_time = epoch_time + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+epoch_time = epoch_time + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+epoch_time
+
+epoch_box = ggplot(tdf,aes(as.factor(epoch),epoch_dur_sec,color=as.factor(batch_size))) + my_theme
+epoch_box = epoch_box + geom_boxplot() + facet_grid( ~ model, scales = 'free_x')
+epoch_box = epoch_box + labs(x=expression(N[epoch]),y=expression(paste(t[epoch]," / s"))) #+ guides(color=FALSE)
+epoch_box = epoch_box + ggtitle("each color represents an individual run (out of 10 runs per configurations)")
+epoch_box
+
+```
+
+`batch_size=32` shows a single outliert at 2 times the runtime per epoch. The other batch sizes show quite some violent variation. 
+
+```{r runtime_summary, echo=FALSE, fig.width = 8}
+rocm_epoch_summ = rocmdf %>% group_by(model,gpu_type,batch_size,epoch)
+
+rocm_single_summ = rocm_epoch_summ %>% group_by(model,gpu_type,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+rocm_nowarmup_summ = rocm_epoch_summ %>% filter(epoch>2) %>% group_by(model,gpu_type,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+k80_epoch_summ = k80df %>% group_by(model,gpu_type,batch_size,epoch)
+
+k80_single_summ = k80_epoch_summ %>% group_by(model,gpu_type,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+k80_nowarmup_summ = k80_epoch_summ %>% filter(epoch>2) %>% group_by(model,gpu_type,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+tdf = k80_single_summ %>% bind_rows(rocm_single_summ)
+epoch_acc_time = ggplot(tdf,aes(as.factor(batch_size),median,color=gpu_type)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=.2))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=.2))
+epoch_acc_time = epoch_acc_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s")))
+epoch_acc_time
+
+```
+
+## Nvidia
+
+```{r short128-nvidia, echo=FALSE, fig.width = 10}
+
+titanxdf <- loaddata("talisker/titanx-pascal-short","*sing*condensed.tsv")
+titanxdf$gpu_type = "Titan Xp"
+p100df <- loaddata("taurus/p100-short","*sing*condensed.tsv")
+p100df$gpu_type = "p100"
+k80df <- loaddata("taurus/short","*sing*condensed.tsv")
+k80df$gpu_type = "k80"
+
+tdf = titanxdf %>% bind_rows(p100df) %>% bind_rows(k80df)
+
+epoch_summ = tdf %>% group_by(model,gpu_type,batch_size,epoch)
+
+single_summ = epoch_summ %>% group_by(model,gpu_type,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+nowarmup_summ = epoch_summ %>% filter(epoch>2) %>% group_by(model,gpu_type,batch_size) %>% summarize(mean = mean(epoch_dur_sec), median= median(epoch_dur_sec), std = sd(epoch_dur_sec), p25=quantile(epoch_dur_sec,.25), p75=quantile(epoch_dur_sec,.75))
+
+epoch_acc_time = ggplot(single_summ,aes(as.factor(batch_size),median,color=gpu_type)) + my_theme
+epoch_acc_time = epoch_acc_time + geom_point(position=position_dodge(width=.2))
+epoch_acc_time = epoch_acc_time + geom_pointrange(aes(ymin=p25,ymax=p75),position=position_dodge(width=.2))
+epoch_acc_time = epoch_acc_time + facet_grid( ~ model  , scales = 'free_x')
+epoch_acc_time = epoch_acc_time + labs(x="batch size",y=expression(paste("median(",t[epoch],") / s"))) + scale_color_hue(name="GPU Model")
+epoch_acc_time
+
+ggsave("../images/deeprace-short-hw.png",epoch_acc_time)
+
+
+```
