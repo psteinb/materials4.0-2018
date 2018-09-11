@@ -1,0 +1,51 @@
+= Where no CPU has gone before
+
+== Deep Learning in bits and pieces
+
+=== Does a third level work?
+
+=== Algebra of CNN
+
+=== A brief history of modern CPUs
+
+=== Back to Algebra
+
+[NOTE.speaker]
+--
+Actually things aren't that bad
+--
+
+=== The Rise of GPUs
+
+[NOTE.speaker]
+--
+mention image recognition competition and how GPUs played a role here
+--
+
+=== Consequences on the market
+
+=== Consequences for practitioners
+
+== Benchmarks
+
+=== Why benchmarks?
+
+=== DBench
+
+=== MLperf
+
+=== deeprace
+
+== Results
+
+=== Long vs Short Runs
+
+=== Containers
+
+=== single-GPU training
+
+=== single-GPU inference
+
+=== multi-GPU training
+
+== Summary
