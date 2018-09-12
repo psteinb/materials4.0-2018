@@ -1,12 +1,84 @@
 = Where no CPU has gone before
+:imagesdir: images
+:icons: font
+:date: September 13, 2018
+:my_name: Peter Steinbach
+:my_email: steinbach@scionics.de
+:stem:
+
+http://dcms.tu-dresden.de/project/dcms-materials-4-0-summer-school-2018/[DCMS Materials 4.0 Summer School 2018] +
+
+mailto:{my_email}[{my_name}], {date}, Dresden, Germany
+
+== Preface
+
+=== My employer
+
+image::scionics_main_logo.png[width=80%]
+
+https://scionics.de[Scionics Computer Innovation GmbH]
+
+[NOTE.speaker]
+--
+- offer scientific consulting 
+- data analysis, large data handling, ...
+--
+
+=== Our client
+
+image::800px-MPI-CBG_building_outside_4pl.jpg[align="center",width=80%]
+
+https://mpi-cbg.de[Max Planck Institute for Molecular Cell Biology and Genetics]
+
+[NOTE.speaker]
+--
+- scientific computing facility
+- my role
+--
+
+
+=== Disclaimer
+
+[.stretch]
+image::bart_simpson_white.png[]
+
+These slides are open-source:
+
+https://github.com/psteinb/materials4.0-2018[github.com/psteinb/materials4.0-2018]
 
 == Deep Learning in bits and pieces
 
-=== Does a third level work?
+image::Typical_cnn.png[]
 
-=== Algebra of CNN
+
+=== Heavy-Lifting inside CNNs
+
+[cols="^.<,^.<",width=100%,frame=none,grid=none] 
+|===
+a| image:3D_Convolution_Animation.gif[width=100%]
+a| image:Matrix_multiplication_diagram_2.png[width=100%]
+
+s| Convolutions
+s| Matrix Operations
+|===
+
+=== A closer look
+
+[cols="^.<,^.<",width=100%,frame=none,grid=none] 
+|===
+s| Convolutions
+s| Matrix Operations
+
+a| latexmath:[y_i = \sum_{n = 0}^{N_k} x_{i+/-n}*k_{i+/-n} ]
+a|
+latexmath:[Ax = y, AB=C]
+|===
+
 
 === A brief history of modern CPUs
+
+
+
 
 === Back to Algebra
 
