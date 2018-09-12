@@ -64,63 +64,179 @@ s| Matrix Operations
 
 === A closer look
 
-[cols="^.<,^.<",width=100%,frame=none,grid=none] 
-|===
-s| Convolutions
-s| Matrix Operations
+- Convolutions +
+  latexmath:[y_i = \sum_{n = 0}^{N_k} x_{i+/-n}*k_{i+/-n} ]
 
-a| latexmath:[y_i = \sum_{n = 0}^{N_k} x_{i+/-n}*k_{i+/-n} ]
-a|
-latexmath:[Ax = y, AB=C]
-|===
+- Matrix Operations +
+  latexmath:[AB=Y, y_{ij} = \sum_{k} a_{ik} * b_{kj} ]
 
-
-=== A brief history of modern CPUs
-
-
-
-
-=== Back to Algebra
+- Common? +
+**Dot Product Structure!**
 
 [NOTE.speaker]
 --
-Actually things aren't that bad
+- thousands of dot-products
+- one HD frame with 3x3 kernel:
+ 2.067.604 independent pixels
+35.149.268 flops
+37.216.872 loads
+ 2.067.604 stores
 --
 
-=== The Rise of GPUs
+=== Where do CPUs come from ?
+
+image::wing-commander.jpg[width=100%]
+
+Low Latency Matters Most
 
 [NOTE.speaker]
 --
-mention image recognition competition and how GPUs played a role here
+- PC users don't want to wait!
+--
+
+=== GPUs for Deep Learning 1/2
+
+image::gpu_cpu_dichotomy.svg[width=100%]
+
+[NOTE.speaker]
+--
+- GPU: smallest unit of concurrency 32 (>3000 cores)
+- CPU: smallest unit of concurrency 1 (10-20 cores)
+--
+
+=== GPUs for Deep Learning 2/2
+
+image::high_throughput_smx.svg[width=100%]
+
+Latency Hiding
+
+[NOTE.speaker]
+--
+- GPU: hides latency of memory access (larger bandwidth)
+- CPU: can hide latency to some degree only
+--
+
+=== The rest is https://qz.com/1034972/the-data-that-changed-the-direction-of-ai-research-and-possibly-the-world/[history]
+
+image::image_classification_006_x600.png[height=100%]
+
+[NOTE.speaker]
+--
+- 2012 first deep learning net by Alex Krizhevsky et al
 --
 
 === Consequences on the market
 
-=== Consequences for practitioners
+image::nvidia_stock.png[]
+
+Nvidia's stock pricing in the last years
 
 == Benchmarks
 
+image::directions.png[]
+
+[NOTE.speaker]
+--
+- beginners typically don't know where to go
+- which framework?
+- web is full of good advice
+--
+
 === Why benchmarks?
 
-=== DBench
+- *Executive* to decide what to buy new hardware
+- *Developer* to compare framework performance
+- *User* wanting to e.g. classify images (fast/slow?)
 
-=== MLperf
+[NOTE.speaker]
+--
+- who are they for?
+--
 
-=== deeprace
+=== fair benchmarks
 
-== Results
+- (deep learning) applications try to solve a problem
+- model written in a particular software framework
+- running on particular hardware for training and/or inference
 
-=== Long vs Short Runs
+Fix at least 2 of 3 from above to *benchmark fair*!
 
-=== Containers
+=== https://dawn.cs.stanford.edu/benchmark/[DawnBench]
+
+- open-source and community driven
+- key requirement: reach fixed accuracy for training for fixed dataset
+
+WARNING: data from 1 run only
+
+WARNING: submitter can choose model implementation
+
+WARNING: data inconsistent (K80 cloud-only, P100 bare-only)
+
+=== https://mlperf.org/[MLperf]
+
+- open-source and community driven
+- industry support (AMD, Google, Intel, ...)
+- goal: SPEC benchmark for Deep Learning
+
+WARNING: data = best of 5 runs
+
+=== https://github.com/psteinb/deeprace[deeprace]
+
+- usable benchmark with clear [semver](semver.org) support
+- model code is fixed
+- **ResNet** with Keras+TensorFlow or just TensorFlow (code adopted from official repos)
+- single and multi-gpu training (distributed planned)
+- data will be open-sourced once I find a sponsor
+
+== Deeprace Results
+
+=== Hardware
+
+- *local cluster*: [Taurus](https://doc.zih.tu-dresden.de/hpc-wiki/bin/view/Compendium/SystemTaurus) at Technical University Dresden
+  - single GPU node: Intel Xeon E5-2680 v3 12c, 64GB, 4x Nvidia Tesla K80
+  
+- Google Computer Engine, single K80 instance, 1vCPU, 6GB, 10GB storage
+
+=== Using ResNet 
+
+images::deeprace-full-single.png[]
+
+Resnet32v1 (and Resnet56v1) as sample models on CIFAR10 dataset
+
+=== Containers for reproducibility
+
+images::deeprace-full-vs-singularity.png[]
+
+- Keras 2.1.5 plus TensorFlow 1.3.0
+- ease the pain of building TensorFlow on non-Ubuntu distros
+
+=== Short runs only
+
+images::deeprace-short-runtimes.png[]
+
+- time per epoch is "flat"
+- limit to `n=15` epochs
+- multiple runs per measurements
 
 === single-GPU training
 
-=== single-GPU inference
+images::deeprace-short-hw.png[]
+
+//=== single-GPU inference
 
 === multi-GPU training
 
+images::deeprace-short-multi-gpu-compared.png
+
+- batch based parallelisation typically with gradient averaging (only possible with tensorflow 1.5+)
+- no linear scaling is a https://medium.com/rossum/towards-efficient-multi-gpu-training-in-keras-with-tensorflow-8a0091074fb2[known problem]
+
 == Summary
+
+- deep learning requires a lot of parallel compute power
+- GPUs et al are indispensible tools
+- hardware/framework landscape diverse
+- solid benchmarks save time & money
 
 == Where No Hardware can go
 

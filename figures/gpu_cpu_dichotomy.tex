@@ -40,10 +40,10 @@
   \node (PCIexpress_name) [draw=none,font=\huge,below=1cm] at(PCIexpress_arrow.south) {PCIe v3 x16};
 
   \node (gpumem_arrow) [double arrow, draw, line width=1pt,inner xsep=.6cm,font=\Large,rotate=-90] at($(gpu.south)!.5!(gpu_ram.north)$) {};
-  \node (gpumem_name) [draw=none,font=\huge] at($(gpu.south)!.5!(gpu_ram.north) + (2,0)$) {$\unit[320]{GB/s}$};
+  \node (gpumem_name) [draw=none,font=\huge] at($(gpu.south)!.5!(gpu_ram.north) + (2,0)$) {$\sim\unit[700]{GB/s}$};
 
   \node (cpumem_arrow) [double arrow, draw, line width=1pt,inner xsep=.6cm,font=\Large,rotate=-90] at($(cpu.south)!.5!(cpu_ram.north)$) {};
-  \node (cpumem_name) [draw=none,font=\huge] at($(cpu.south)!.5!(cpu_ram.north) + (-2,0)$) {$\unit[50]{GB/s}$};
+  \node (cpumem_name) [draw=none,font=\huge] at($(cpu.south)!.5!(cpu_ram.north) + (-2,0)$) {$\sim\unit[70]{GB/s}$};
 
 % %  \draw[dashed, very thick] (5,-1) rectangle (25,14) ;
 %   \foreach \c in {0,...,3}
