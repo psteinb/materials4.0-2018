@@ -184,7 +184,7 @@ WARNING: data = best of 5 runs
 
 - usable benchmark with clear https://semver.org[semver] support
 - model code is fixed
-- **ResNet** with Keras+TensorFlow or just TensorFlow (code adopted from official repos)
+- **ResNet** (https://arxiv.org/pdf/1512.03385.pdf[v1], https://arxiv.org/pdf/1603.05027.pdf[v2]) with Keras+TensorFlow or just TensorFlow (code adopted from official repos)
 - single and multi-gpu training (distributed planned)
 - data will be open-sourced once I find a sponsor
 
