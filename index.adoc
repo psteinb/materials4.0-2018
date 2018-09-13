@@ -24,9 +24,9 @@ https://scionics.de[Scionics Computer Innovation GmbH]
 - data analysis, large data handling, ...
 --
 
-=== Our client
+=== Our client: https://mpi-cbg.de[MPI CBG]
 
-image::800px-MPI-CBG_building_outside_4pl.jpg[]
+image::x600px-MPI-CBG_building_outside_4pl.jpg[]
 
 https://mpi-cbg.de[Max Planck Institute for Molecular Cell Biology and Genetics]
 
